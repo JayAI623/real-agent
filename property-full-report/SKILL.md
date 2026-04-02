@@ -1,18 +1,27 @@
 ---
 name: property-full-report
-description: Run a complete King County property analysis for a given address. Invokes all four property skills in sequence — parcel-radar, slope_tool, kingcounty-imap, parcel-validator — and presents a unified full report. Use when the user wants a comprehensive property deep-dive, full due diligence, or complete property report for any address in King County, WA.
+description: Run a complete King County property analysis for a given address. Invokes all four property skills with parallelism — parcel-radar first, then slope_tool + kingcounty-imap in parallel, then parcel-validator — and presents a unified full report. Use when the user wants a comprehensive property deep-dive, full due diligence, or complete property report for any address in King County, WA.
 ---
 
 # Property Full Report — King County Complete Analysis
 
 ## Overview
 
-This is the master skill that orchestrates a full property analysis by running four sub-skills in sequence for a single address. Each skill builds on the context of the previous one.
+This master skill orchestrates a full property analysis using **parallel execution** to minimize total run time.
 
 **Pipeline:**
 ```
-parcel-radar → slope_tool → kingcounty-imap → parcel-validator
+        Step 1: parcel-radar          (serial — provides coords/PIN for all others)
+                     |
+        ┌────────────┴────────────┐
+        ↓                         ↓
+Step 2a: slope_tool     Step 2b: kingcounty-imap   (PARALLEL — independent of each other)
+        └────────────┬────────────┘
+                     ↓
+        Step 3: parcel-validator      (serial — synthesizes all data, generates PDF)
 ```
+
+**Expected time savings:** ~40–50% vs. sequential execution. Steps 2a and 2b run simultaneously.
 
 ---
 
@@ -22,30 +31,29 @@ When this skill is invoked, follow these steps exactly.
 
 ### Step 0 — Confirm Address
 
-Before running anything, echo back the address to the user and confirm you are starting a full 4-skill analysis:
+Echo back the address and confirm the parallel pipeline:
 
 > "Running full property analysis for: **[ADDRESS]**
-> Steps: parcel-radar → slope_tool → kingcounty-imap → parcel-validator"
+> Pipeline: parcel-radar → [slope_tool ‖ kingcounty-imap] → parcel-validator"
 
 ---
 
-### Step 1 — parcel-radar
+### Step 1 — parcel-radar (serial)
 
 Invoke the `parcel-radar` skill for the given address.
 
-**Goal:** Establish the property baseline — PIN, lot size, building details, assessed value, zoning.
+**Goal:** Establish the property baseline. This step MUST complete before Step 2 because all other skills depend on the coordinates, PIN, and city it returns.
 
-Collect and retain these fields for use in later steps:
+Collect and retain:
 - Parcel PIN
-- Lot size (sq ft and acres)
-- Building sq ft
-- Year built
-- Bedrooms / Bathrooms
+- Latitude / Longitude (WGS84) — **critical for Steps 2a and 2b**
+- City name (normalized, e.g. "BELLEVUE", "KENMORE")
+- Lot size (sq ft and acres) — use `Shape.STArea()` from KC parcel API, NOT bbox estimate
+- Building sq ft, year built, bedrooms, bathrooms
 - Assessed value (land + improvement + total)
-- Zoning code and jurisdiction (city or unincorporated KC)
-- Property type
+- Zoning code and jurisdiction
 
-Print a section header when done:
+Print when done:
 ```
 ## 1. Parcel Data (parcel-radar)
 [results here]
@@ -53,47 +61,48 @@ Print a section header when done:
 
 ---
 
-### Step 2 — slope_tool
+### Step 2 — slope_tool + kingcounty-imap (PARALLEL)
 
-Invoke the `slope_tool` skill for the same address.
+Launch **both** skills simultaneously using the `Agent` tool. Send a single message with two Agent tool calls at the same time — do NOT wait for one before starting the other.
 
-**Goal:** Characterize the terrain — elevation range, contour count, estimated max slope, terrain classification.
+**Agent A — slope_tool:**
+- Run the `slope_tool` skill for the address
+- Pass the city and parcel bbox from Step 1 as context
+- Goal: elevation range, contour count, max slope estimate, terrain classification
 
-Use the parcel PIN and city from Step 1 as context if helpful.
+**Agent B — kingcounty-imap:**
+- Run the `kingcounty-imap` skill for the address
+- Pass `--lat [lat] --lon [lng]` from Step 1 to the imap_scrape.py script
+- Goal: flood zone, landslide hazard, wetlands, sensitive area overlays, iMap screenshots
 
-Print a section header when done:
+Wait for BOTH agents to return before proceeding to Step 3.
+
+Print when both are done:
 ```
 ## 2. Slope & Terrain (slope_tool)
-[results here]
-```
+[Agent A results]
 
----
-
-### Step 3 — kingcounty-imap
-
-Invoke the `kingcounty-imap` skill for the same address.
-
-**Goal:** Check environmental and regulatory hazard overlays — flood zones, landslide hazard, wetlands, steep slope critical areas.
-
-Use the lat/lng coordinates confirmed in Step 1 or Step 2 to pass `--lat` and `--lon` arguments to the imap_scrape.py script for reliability.
-
-Print a section header when done:
-```
 ## 3. Environmental & Hazard Layers (kingcounty-imap)
-[results here]
+[Agent B results]
 ```
 
 ---
 
-### Step 4 — parcel-validator
+### Step 3 — parcel-validator (serial)
 
 Invoke the `parcel-validator` skill for the same address.
 
-**Goal:** Cross-validate King County Assessor data against Zillow. Generate a PDF report with screenshots highlighting discrepancies.
+**Goal:** Cross-validate KC Assessor data vs. Zillow. Generate PDF report with screenshots.
 
-Pass the structured data already collected in Steps 1–3 to the validator as context so it does not need to re-fetch the same data from the Assessor.
+Pass all data collected in Steps 1 and 2 as context — the validator should NOT re-fetch KC Assessor data it already has.
 
-Print a section header when done:
+For PDF generation use **reportlab** (not WeasyPrint — WeasyPrint requires libgobject which is not available on Windows). Example:
+```bash
+pip install reportlab --break-system-packages -q
+python3 gen_report.py
+```
+
+Print when done:
 ```
 ## 4. Data Validation vs. Zillow (parcel-validator)
 [results here]
@@ -101,9 +110,9 @@ Print a section header when done:
 
 ---
 
-### Step 5 — Final Summary
+### Step 4 — Final Summary
 
-After all four skills complete, print a unified summary section:
+Print a unified summary table:
 
 ```
 ## Full Report Summary — [ADDRESS]
@@ -121,17 +130,18 @@ After all four skills complete, print a unified summary section:
 | Landslide Hazard      | [Yes/No/Moderate]                    |
 | Wetlands / Sensitive  | [Yes/No]                             |
 | Zillow Data Match     | [Match / Discrepancies found]        |
-| PDF Report            | [path or link]                       |
+| PDF Report            | [path]                               |
 ```
 
-Close with any critical flags — e.g., if slope > 40%, flood zone AE, or landslide hazard is present, call these out explicitly as **red flags** the user should investigate before proceeding.
+Call out any **red flags** explicitly if: slope > 40%, flood zone AE/VE, landslide hazard present, sensitive area notice on title, non-residential zoning, or >30% discrepancy in assessed value.
 
 ---
 
 ## Error Handling
 
-- If any individual skill fails, log the error under that section header, then continue to the next skill. Do not abort the entire pipeline.
-- If Step 1 (parcel-radar) fails to geocode the address, stop and ask the user to verify the address before continuing — the other skills depend on confirmed coordinates.
+- If any individual skill fails, log the error under that section header and continue. Do not abort the pipeline.
+- If Step 1 (parcel-radar) fails to geocode, stop immediately and ask the user to verify the address — all other steps depend on it.
+- If one of the parallel agents (Step 2) fails, still wait for the other before proceeding to Step 3.
 
 ---
 
@@ -139,5 +149,6 @@ Close with any critical flags — e.g., if slope > 40%, flood zone AE, or landsl
 
 - All data sources are public King County GIS and Assessor APIs — no API key required.
 - This skill covers **King County, WA only**.
-- The full pipeline may take 2–4 minutes depending on browser automation steps in kingcounty-imap and parcel-validator.
-- The PDF report is generated by parcel-validator and saved locally. Its path will be printed in Step 4.
+- Lot size: always use `Shape.STArea()` from the KC parcel API. Never use bbox approximation — it overestimates.
+- PDF generation: use **reportlab** on Windows. WeasyPrint requires libgobject and will fail.
+- Total pipeline time with parallelism: ~2–3 min (vs. ~4–5 min sequential).
