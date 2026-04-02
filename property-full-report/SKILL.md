@@ -1,0 +1,143 @@
+---
+name: property-full-report
+description: Run a complete King County property analysis for a given address. Invokes all four property skills in sequence — parcel-radar, slope_tool, kingcounty-imap, parcel-validator — and presents a unified full report. Use when the user wants a comprehensive property deep-dive, full due diligence, or complete property report for any address in King County, WA.
+---
+
+# Property Full Report — King County Complete Analysis
+
+## Overview
+
+This is the master skill that orchestrates a full property analysis by running four sub-skills in sequence for a single address. Each skill builds on the context of the previous one.
+
+**Pipeline:**
+```
+parcel-radar → slope_tool → kingcounty-imap → parcel-validator
+```
+
+---
+
+## Execution Instructions
+
+When this skill is invoked, follow these steps exactly.
+
+### Step 0 — Confirm Address
+
+Before running anything, echo back the address to the user and confirm you are starting a full 4-skill analysis:
+
+> "Running full property analysis for: **[ADDRESS]**
+> Steps: parcel-radar → slope_tool → kingcounty-imap → parcel-validator"
+
+---
+
+### Step 1 — parcel-radar
+
+Invoke the `parcel-radar` skill for the given address.
+
+**Goal:** Establish the property baseline — PIN, lot size, building details, assessed value, zoning.
+
+Collect and retain these fields for use in later steps:
+- Parcel PIN
+- Lot size (sq ft and acres)
+- Building sq ft
+- Year built
+- Bedrooms / Bathrooms
+- Assessed value (land + improvement + total)
+- Zoning code and jurisdiction (city or unincorporated KC)
+- Property type
+
+Print a section header when done:
+```
+## 1. Parcel Data (parcel-radar)
+[results here]
+```
+
+---
+
+### Step 2 — slope_tool
+
+Invoke the `slope_tool` skill for the same address.
+
+**Goal:** Characterize the terrain — elevation range, contour count, estimated max slope, terrain classification.
+
+Use the parcel PIN and city from Step 1 as context if helpful.
+
+Print a section header when done:
+```
+## 2. Slope & Terrain (slope_tool)
+[results here]
+```
+
+---
+
+### Step 3 — kingcounty-imap
+
+Invoke the `kingcounty-imap` skill for the same address.
+
+**Goal:** Check environmental and regulatory hazard overlays — flood zones, landslide hazard, wetlands, steep slope critical areas.
+
+Use the lat/lng coordinates confirmed in Step 1 or Step 2 to pass `--lat` and `--lon` arguments to the imap_scrape.py script for reliability.
+
+Print a section header when done:
+```
+## 3. Environmental & Hazard Layers (kingcounty-imap)
+[results here]
+```
+
+---
+
+### Step 4 — parcel-validator
+
+Invoke the `parcel-validator` skill for the same address.
+
+**Goal:** Cross-validate King County Assessor data against Zillow. Generate a PDF report with screenshots highlighting discrepancies.
+
+Pass the structured data already collected in Steps 1–3 to the validator as context so it does not need to re-fetch the same data from the Assessor.
+
+Print a section header when done:
+```
+## 4. Data Validation vs. Zillow (parcel-validator)
+[results here]
+```
+
+---
+
+### Step 5 — Final Summary
+
+After all four skills complete, print a unified summary section:
+
+```
+## Full Report Summary — [ADDRESS]
+
+| Category              | Key Finding                          |
+|-----------------------|--------------------------------------|
+| Parcel ID             | [PIN]                                |
+| Lot Size              | [X] sq ft / [Y] acres                |
+| Building              | [sqft], [beds]/[baths], built [year] |
+| Assessed Value        | $[total]                             |
+| Zoning                | [zone code] ([city/KC])              |
+| Terrain               | [type] — [elevation range] ft relief |
+| Max Slope (est.)      | ~[X]% ([Y]°)                         |
+| Flood Zone            | [FEMA zone]                          |
+| Landslide Hazard      | [Yes/No/Moderate]                    |
+| Wetlands / Sensitive  | [Yes/No]                             |
+| Zillow Data Match     | [Match / Discrepancies found]        |
+| PDF Report            | [path or link]                       |
+```
+
+Close with any critical flags — e.g., if slope > 40%, flood zone AE, or landslide hazard is present, call these out explicitly as **red flags** the user should investigate before proceeding.
+
+---
+
+## Error Handling
+
+- If any individual skill fails, log the error under that section header, then continue to the next skill. Do not abort the entire pipeline.
+- If Step 1 (parcel-radar) fails to geocode the address, stop and ask the user to verify the address before continuing — the other skills depend on confirmed coordinates.
+
+---
+
+## Notes
+
+- All data sources are public King County GIS and Assessor APIs — no API key required.
+- This skill covers **King County, WA only**.
+- The full pipeline may take 2–4 minutes depending on browser automation steps in kingcounty-imap and parcel-validator.
+- The PDF report is generated by parcel-validator and saved locally. Its path will be printed in Step 4.
