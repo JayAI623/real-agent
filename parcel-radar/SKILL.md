@@ -1,6 +1,6 @@
 ---
 name: parcel-radar
-description: Look up property/parcel information for addresses in King County, WA using public GIS and Assessor APIs. Use when the user asks about property details, assessed values, tax info, parcel numbers, lot size, owner info, or building details for any address in King County (Seattle, Bellevue, Kirkland, Redmond, etc.).
+description: Look up property/parcel information for addresses in King County, WA using public GIS and Assessor APIs. Use when the user asks about property details, assessed values, tax info, parcel numbers, lot size, or building details for any address in King County (Seattle, Bellevue, Kirkland, Redmond, etc.).
 ---
 
 # Parcel Radar - King County Property Lookup
@@ -28,21 +28,39 @@ https://blue.kingcounty.com/Assessor/eRealProperty/Dashboard.aspx?ParcelNbr={PIN
 ```
 
 Extract:
-- Owner name
-- Assessed values: land, improvement, total
 - Building details: year built, sq ft, bedrooms, bathrooms, grade, condition
 - Lot size
-- Tax info: levy rate, levy code, tax year
-- Other: waterfront, views, zoning
+- Sales history
 
-### Step 3: Present Results
+### Step 3: Zoning Lookup via GIS
+
+Use the `location.x` and `location.y` coordinates from the Step 1 geocoder response (State Plane, WKID 2926) to query two zoning layers **in parallel**:
+
+**Layer 0 — Incorporated Areas** (returns which city the parcel is in):
+```
+https://gismaps.kingcounty.gov/arcgis/rest/services/Planning/KingCo_Zoning/MapServer/0/query?geometry={X},{Y}&geometryType=esriGeometryPoint&inSR=2926&spatialRel=esriSpatialRelIntersects&outFields=*&f=json
+```
+- If features returned → parcel is in an **incorporated city** (e.g., Kenmore, Bellevue)
+- Extract `CITYNAME` and `JURIS` code
+
+**Layer 1 — King County Zoning** (unincorporated areas only):
+```
+https://gismaps.kingcounty.gov/arcgis/rest/services/Planning/KingCo_Zoning/MapServer/1/query?geometry={X},{Y}&geometryType=esriGeometryPoint&inSR=2926&spatialRel=esriSpatialRelIntersects&outFields=*&f=json
+```
+- If features returned → parcel is in **unincorporated King County**
+- Extract `CURRZONE` (current zone code) and `POTENTIAL`
+
+**Interpretation logic:**
+- Layer 0 hit + Layer 1 empty → incorporated city, zoning managed by city
+- Layer 0 empty + Layer 1 hit → unincorporated KC, show `CURRZONE`
+- Both empty → zoning data not available
+
+### Step 4: Present Results
 
 Format as a structured table with sections:
-1. Basic info (parcel number, owner, address)
-2. Assessed values (land, improvement, total)
-3. Building details (year built, sq ft, beds/baths, etc.)
-4. Tax information
-5. Value trend if historical data is available
+1. Building details (year built, sq ft, beds/baths, etc.)
+2. Zoning (zone code or city jurisdiction + link)
+3. Sales history
 
 ## Additional API Endpoints
 
