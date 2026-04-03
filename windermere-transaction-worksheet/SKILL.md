@@ -27,16 +27,15 @@ Before reading any PDF, confirm two things:
 **A. Contract PDF path:**
 Ask the user: "Please provide the full path to the contract PDF (e.g. C:\Users\...\contract.pdf)"
 
-**B. Agent's own information** (not in the contract — must ask user):
-Ask for the following if not already provided:
-- WRE Office (Bellevue / Bellevue South / Bellevue West / Issaquah / Redmond / Yarrow Bay)
-- Agent Full Name
-- Agent LAG #
-- Agent E-mail
-- Transaction Side (Listing / Selling / Both)
-- Assistant E-mail (optional)
+**B. Agent's own information** (not in the contract — defaults pre-filled below, confirm before use):
+- WRE Office: **Bellevue South**
+- Agent Full Name: **Harry Liu**
+- Agent LAG #: **116354**
+- Agent E-mail: **harryliu@windermere.com**
+- Transaction Side: detect from contract (if Harry Liu appears as Buyer Broker → Selling; as Listing Broker → Listing)
+- Assistant E-mail: none
 
-You can ask for A and B together in one message to save time.
+Only ask the user to confirm or override these defaults if something looks wrong.
 
 ---
 
